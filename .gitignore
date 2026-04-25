@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+
+# builds
+.DS_Store
+dist/
+coverage/
+*.tsbuildinfo
+
+# env/secrets
+.env
+.env.*
+!.env.example
+
+# runtime data
+.data/
+data/
+logs/
+*.log
+
+# editor
+.vscode/
+.idea/
+
+# temporary
+.tmp/
+tmp/
