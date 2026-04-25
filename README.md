@@ -8,7 +8,7 @@
 - Hermes 的稳定性：会话记忆、持久化、工具纪律、审计和统计能力。
 - pi-mono 的模块化思路：把 runtime、provider、agent loop、UI/adapter 拆开，后续更容易扩展。
 
-当前仓库采用 build in public 的方式持续完善。
+当前仓库已经公开，采用 build in public 的方式持续完善。
 
 ## 当前状态
 
