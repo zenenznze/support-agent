@@ -4,6 +4,7 @@ node_modules/
 # builds
 .DS_Store
 dist/
+build/
 coverage/
 *.tsbuildinfo
 
@@ -11,17 +12,45 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.*.example
+*.pem
+*.key
+*.crt
 
-# runtime data
+# runtime data - never commit local state
 .data/
 data/
+local-data/
 logs/
 *.log
+sessions/
+traces/
+history/
+
+# private docs / local mirrors
+private-docs/
+docs-private/
+support-docs-private/
+feishu-cache/
+feishu-mirror/
+wiki-private/
+
+# evaluation and ops outputs
+eval-output/
+ops-output/
+benchmark-output/
+reports/private/
+*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+
+# caches / temporary
+.cache/
+.tmp/
+tmp/
+*.tmp
 
 # editor
 .vscode/
 .idea/
-
-# temporary
-.tmp/
-tmp/

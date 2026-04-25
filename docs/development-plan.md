@@ -1,172 +1,308 @@
-# support-agent Development Plan
+# support-agent 完整开发计划
 
-> For Hermes: after this planning/setup task, use subagent-driven-development skill to implement the plan task-by-task. Keep OpenClaw production 8787 untouched.
+> For Hermes: 后续实现本计划时，使用 subagent-driven-development 或等价的逐任务开发方式推进；每个相对独立事项完成后及时 commit。任何集成都必须保持 OpenClaw 正式 8787 链路不受影响。
 
-Goal: Build a new private-first `support-agent` backend that combines OpenClaw support route speed with Hermes-style memory, session stability, and extensibility.
+目标：构建一个新的专用客服后端 `support-agent`，把 OpenClaw support 的速度、Hermes 的记忆稳定性、pi-mono 的模块化 runtime/provider/agent 设计结合起来。
 
-Architecture: Start as an isolated standalone repository and runtime. The first implementation should be a fast HTTP support backend with a small agent loop, bounded tool/doc retrieval, persistent conversation memory, structured traces, and adapter compatibility with existing chatbot bridge routes. It should learn from `badlogic/pi-mono` for modular agent/runtime/provider design, from `nousresearch/hermes-agent` for memory/session/tool reliability, and from `openclaw/openclaw` for fast doc-only support flow.
+架构：从独立公开仓库开始，先做一个轻量 HTTP support runtime。核心是小而可控的 agent loop、预构建文档索引、紧凑 session memory、结构化 trace、可替换 provider，以及与现有 chatbot-mvp/OpenClaw 链路隔离的 adapter。
 
-Tech Stack: TypeScript/Node.js for the HTTP runtime and adapters; optional Python only for offline indexing/evaluation scripts; OpenAI-compatible LLM API; SQLite or file-backed JSONL for first local persistence; MIT License.
+技术栈：TypeScript/Node.js 作为主 runtime；OpenAI-compatible provider；SQLite 或 JSONL 作为第一版本地持久化；Python 仅用于可选离线评测/数据处理脚本；MIT License。
 
 ---
 
-## 0. Reference snapshot
+## 0. 项目定位
 
-Verified on 2026-04-25:
+`support-agent` 不是：
 
-- `badlogic/pi-mono`
-  - URL: `https://github.com/badlogic/pi-mono`
-  - License: MIT
-  - Description: AI agent toolkit: coding agent CLI, unified LLM API, TUI & web UI libraries, Slack bot, vLLM pods
-- `nousresearch/hermes-agent`
-  - URL: `https://github.com/nousresearch/hermes-agent`
-  - License: MIT
-  - Description: The agent that grows with you
-- `openclaw/openclaw`
-  - URL: `https://github.com/openclaw/openclaw`
-  - License: MIT
-  - Description: personal AI assistant / OpenClaw platform
+- 不是 Hermes 的 fork。
+- 不是 OpenClaw 的替代品。
+- 不是当前生产 `/api/chat` 的直接替换。
+- 不是把本地私有 support docs 打包公开的仓库。
 
-Chosen project license: MIT, because all three references are MIT and the goal is open-source-compatible even though the initial repository is private.
+`support-agent` 是：
 
-## 1. Non-negotiable constraints
+- 一个新的专用客服后端。
+- 一个 build in public 的公开项目。
+- 一个可接入不同 LLM provider 的轻量 support runtime。
+- 一个保留 session memory、trace、统计、评测能力的客服 agent。
+- 一个未来可以通过独立实验路由接入 chatbot-mvp 的后端。
 
-1. Do not modify or destabilize current OpenClaw production path.
-2. Do not point existing `/api/chat` to the new backend until an explicit later cutover task.
-3. Keep this project in its own repo and local folder:
-   - `/home/ubuntu/support-agent`
-   - `https://github.com/zenenznze/support-agent`
-4. Treat referenced projects as references first. Do not copy substantial code before auditing exact license headers, APIs, and file-level provenance.
-5. Optimize for common support requests replying within 5 seconds after warmup.
-6. Preserve audit/statistics/analysis extensibility from day one.
-7.客服回答策略：优先直接给出飞书/support docs 中能解决问题的内容；文档没有明确答案时才补充说明。
+## 1. 背景与根因
 
-## 2. Target architecture
+前面对比 OpenClaw support 与 Hermes 测试后端时，观察到：
 
-### 2.1 Components
+- OpenClaw support 平均接口时延明显更低。
+- Hermes 测试后端慢的主因不是模型，而是调用路径和 agent loop 太重。
+- Hermes 测试后端路径近似为：Node -> Python helper -> shell wrapper -> Hermes CLI -> 完整 AIAgent 循环。
+- Hermes 每题会产生较多 messages/tool calls/tool results，简单客服问题也可能多轮查证。
+- OpenClaw support 更像专用 doc-only runtime，短链路、更少事件、更快收敛。
 
-- `src/server.ts`
-  - Fast HTTP API.
-  - Endpoints: `/health`, `/v1/chat`, `/v1/history/:sessionId`, `/v1/admin/stats`.
-- `src/agent/fast-support-agent.ts`
-  - Small bounded agent loop.
-  - Default max doc reads: 3.
-  - Default max LLM calls: 2 for common cases, hard cap 4.
-- `src/providers/openai-compatible.ts`
-  - OpenAI-compatible chat completion client.
-  - Provider config via env.
-- `src/docs/indexer.ts`
-  - Build/search lightweight local doc index.
-  - Start with manifest + keyword/BM25-like scoring; vector search optional later.
-- `src/memory/session-store.ts`
-  - Persistent sessions, user facts, recent conversation summary.
-  - First version: SQLite preferred; JSONL fallback acceptable.
-- `src/tracing/trace-store.ts`
-  - Request-level trace events for audit and performance breakdown.
-- `src/adapters/chatbot-bridge.ts`
-  - Compatibility payloads for current chatbot-mvp bridge.
-- `eval/`
-  - Replay the existing support-vs-Hermes question set and compare latency/quality.
-- `docs/`
-  - Development plan, architecture notes, integration contract.
+因此新项目的核心不是“换模型”，而是重做客服后端运行时：
 
-### 2.2 Runtime model
+1. 避免每次请求启动完整 CLI agent。
+2. 避免无边界工具/文档探索。
+3. 用预构建索引替代每次从零读文件。
+4. 保留但压缩 memory。
+5. 让 trace/stats 从第一天就存在。
 
-Request flow:
+## 2. 参考项目
 
-1. Receive chat message.
-2. Load compact session memory.
-3. Classify request:
-   - direct-hit FAQ/hardline answer
-   - doc retrieval needed
-   - unsupported/needs fallback
-4. Retrieve only the top small set of relevant docs/snippets.
-5. Call LLM with compact prompt + snippets + memory.
-6. Return short answer and trace metadata.
-7. Persist session, trace, and stats asynchronously where safe.
+### 2.1 pi-mono
 
-### 2.3 Why this should be faster
+URL: https://github.com/badlogic/pi-mono
 
-- Avoid Hermes CLI cold path: no Node -> Python helper -> shell wrapper -> Hermes CLI chain.
-- Avoid full general-purpose agent loop for every support message.
-- Bound doc/tool reads.
-- Use a prebuilt doc manifest/index instead of repeatedly discovering files.
-- Keep memory compact and loaded directly, not via broad prompt/tool exploration.
-- Preserve OpenClaw’s doc-only discipline for support answers.
+参考方向：
 
-## 3. Milestone plan
+- agent toolkit 的模块化拆分。
+- provider / runtime / UI / adapter 分层。
+- CLI、TUI、web UI、Slack bot 等多入口复用底层能力的思路。
 
-### Milestone A: Repository setup
+使用原则：
 
-Objective: Create the standalone private repository and initial project metadata.
+- 先做架构审计，不直接复制代码。
+- 如果后续直接依赖其 package，需要确认 package 边界、API 稳定性和 license headers。
 
-Files:
+### 2.2 Hermes Agent
 
-- Create: `/home/ubuntu/support-agent/README.md`
-- Create: `/home/ubuntu/support-agent/LICENSE`
-- Create: `/home/ubuntu/support-agent/.gitignore`
-- Create: `/home/ubuntu/support-agent/docs/development-plan.md`
-- Create: `/home/ubuntu/support-agent/docs/architecture.md`
+URL: https://github.com/nousresearch/hermes-agent
 
-Steps:
+参考方向：
 
-1. Create `/home/ubuntu/support-agent`.
-2. Add MIT license.
-3. Add README that clearly states private-first support backend, not current production runtime.
-4. Copy this development plan into `docs/development-plan.md`.
-5. Initialize git, commit, create private GitHub repo `zenenznze/support-agent`, push `main`.
-6. Verify remote URL and branch.
+- 会话持久化。
+- memory 注入与用户偏好保存。
+- tool 调用纪律。
+- 轨迹、上下文、技能/文档能力。
 
-Expected verification:
+使用原则：
+
+- 借鉴稳定性和记忆设计，不复制完整 CLI agent loop。
+- 客服后端要比 Hermes 更窄、更快、更可控。
+
+### 2.3 OpenClaw
+
+URL: https://github.com/openclaw/openclaw
+
+参考方向：
+
+- support route 的短链路。
+- doc-only support agent 边界。
+- gateway / session / history 的经验。
+- 当前生产链路的速度和稳定性目标。
+
+使用原则：
+
+- 不改生产 8787。
+- 未来只通过显式实验路由接入。
+- 把 OpenClaw support 的“少轮次、短回答、文档优先”变成 support-agent 的默认策略。
+
+## 3. 非协商约束
+
+1. 未经明确确认，不替换 OpenClaw 正式 `/api/chat`。
+2. 未经明确确认，不改 8787 正式服务。
+3. 仓库公开，但本地私有测试数据不公开。
+4. 常见请求目标：warmup 后 5 秒内回复。
+5. 回答策略：文档有明确答案时，优先直接给文档内容；没有时才补充说明。
+6. agent loop 必须有预算：最大 LLM 次数、最大检索次数、最大耗时。
+7. trace、stats、session memory 要从早期就设计，不后补。
+8. 每个开发事项及时 commit。
+
+## 4. 公开仓库与本地私有数据边界
+
+详细规则见 `docs/local-private-data-policy.md`。
+
+必须留在本地：
+
+- `.env`、API key、token。
+- 本地飞书文档镜像、support docs 私有快照。
+- 真实用户聊天记录、session、trace、history。
+- 本地 benchmark 原始输出。
+- 内部路径、生产配置、真实服务日志。
+
+可以公开：
+
+- 通用代码。
+- 空配置模板。
+- 脱敏 fixture。
+- 公开评测方法。
+- 汇总指标。
+- 架构文档和计划。
+
+推荐本地目录：
+
+```text
+local-data/
+├── docs-private/
+├── sessions/
+├── traces/
+└── eval-datasets/
+eval-output/
+ops-output/
+logs/
+```
+
+这些目录必须被 `.gitignore` 覆盖。
+
+## 5. 目标架构
+
+### 5.1 组件
+
+```text
+src/
+├── server.ts                         # HTTP API 入口
+├── config.ts                         # 环境变量与配置解析
+├── agent/
+│   ├── fast-support-agent.ts          # 有预算的客服 agent loop
+│   ├── direct-hit.ts                  # 高频问题直答规则
+│   └── types.ts
+├── docs/
+│   ├── loader.ts                      # 文档加载
+│   ├── indexer.ts                     # 本地索引构建
+│   ├── search.ts                      # 轻量检索
+│   └── types.ts
+├── providers/
+│   ├── openai-compatible.ts           # OpenAI-compatible provider
+│   ├── mock-provider.ts               # 测试 provider
+│   └── types.ts
+├── memory/
+│   ├── session-store.ts               # session 存储接口
+│   ├── jsonl-store.ts                 # 简单本地持久化
+│   └── sqlite-store.ts                # 可选 SQLite 实现
+├── tracing/
+│   ├── trace-store.ts                 # trace 持久化
+│   └── types.ts
+├── stats/
+│   └── latency-stats.ts               # 延迟统计
+└── adapters/
+    └── chatbot-bridge.ts              # 未来 chatbot-mvp adapter
+```
+
+### 5.2 请求流程
+
+1. 收到 `/v1/chat` 请求。
+2. 读取紧凑 session memory。
+3. 分类：direct-hit / docs-needed / fallback。
+4. direct-hit 命中时直接返回，不调用 LLM。
+5. docs-needed 时检索 top 3 snippets。
+6. 一次 LLM 调用生成回答。
+7. 如证据不足，最多再检索/调用一次。
+8. 返回 answer + traceId + latencyMs。
+9. 异步或低成本写入 session、trace、stats。
+
+### 5.3 性能预算
+
+默认预算：
+
+- direct-hit：0 次 LLM，目标 < 500ms。
+- 普通文档问答：1 次 LLM，目标 < 5s。
+- 复杂问题：最多 2 次 LLM，目标 < 15s。
+- hard cap：最多 4 次 LLM，但默认不启用到这么高。
+- 文档检索 topK：3。
+- 单请求 timeout：30s。
+
+### 5.4 API 草案
+
+`GET /health`
+
+响应：
+
+```json
+{
+  "ok": true,
+  "service": "support-agent",
+  "version": "0.1.0"
+}
+```
+
+`POST /v1/chat`
+
+请求：
+
+```json
+{
+  "sessionId": "web-123",
+  "message": "pro 和 max 哪个更稳？",
+  "metadata": {
+    "source": "webchat"
+  }
+}
+```
+
+响应：
+
+```json
+{
+  "ok": true,
+  "sessionId": "web-123",
+  "answer": "...",
+  "traceId": "trace_...",
+  "latencyMs": 1234,
+  "route": "direct-hit"
+}
+```
+
+`GET /v1/history/:sessionId`
+
+返回脱敏/本地 session history，默认只本地可用或需要 admin token。
+
+`GET /v1/admin/stats`
+
+返回本地统计，默认只允许 localhost 或 admin token。
+
+## 6. Milestone A: 公开仓库与文档基线
+
+状态：当前正在完成。
+
+目标：仓库公开，README 中文，完整计划入库，本地私有数据边界入库。
+
+文件：
+
+- 修改：`README.md`
+- 修改：`.gitignore`
+- 修改：`docs/development-plan.md`
+- 创建：`docs/local-private-data-policy.md`
+
+验证：
 
 ```bash
-cd /home/ubuntu/support-agent
 git status --short
-# expected: empty
-
-git remote -v
-# expected: origin https://github.com/zenenznze/support-agent.git
-
+git log --oneline --decorate -3
 git ls-remote --heads origin main
-# expected: one main branch commit
+curl -L -s -o /dev/null -w '%{http_code}\n' https://github.com/zenenznze/support-agent
+curl -L -s -o /dev/null -w '%{http_code}\n' https://raw.githubusercontent.com/zenenznze/support-agent/main/README.md
 ```
 
 Commit:
 
 ```bash
-git commit -m "chore: initialize support-agent repository"
+git commit -m "docs: prepare support-agent for build in public"
 ```
 
-### Milestone B: Reference project audit
+## 7. Milestone B: 参考项目审计
 
-Objective: Inspect the three reference projects enough to define what to reuse conceptually.
+目标：弄清楚三个参考项目哪些只做概念参考，哪些可以作为依赖或移植对象。
 
-Files:
+文件：
 
-- Create: `docs/references/pi-mono-audit.md`
-- Create: `docs/references/hermes-agent-audit.md`
-- Create: `docs/references/openclaw-audit.md`
-- Create: `docs/references/design-decisions.md`
+- 创建：`docs/references/pi-mono-audit.md`
+- 创建：`docs/references/hermes-agent-audit.md`
+- 创建：`docs/references/openclaw-audit.md`
+- 创建：`docs/references/design-decisions.md`
 
-Steps:
+步骤：
 
-1. Clone or shallow inspect `badlogic/pi-mono` outside the repo, e.g. `/home/ubuntu/reference-repos/pi-mono`.
-2. Inspect package layout, runtime abstractions, provider interfaces, examples.
-3. Inspect `nousresearch/hermes-agent` memory/session/tool orchestration patterns.
-4. Inspect `openclaw/openclaw` support/gateway/agent runtime patterns and current local OpenClaw support route.
-5. Write audit docs with:
-   - useful ideas
-   - code we must not copy yet
-   - API patterns worth adopting
-   - license notes
-6. Commit audit docs.
+1. shallow clone 三个参考项目到 `/home/ubuntu/reference-repos/`。
+2. 记录 license、package 结构、核心 runtime/provider/memory/gateway 文件。
+3. 找出可借鉴的接口边界。
+4. 明确不复制的代码和原因。
+5. 写设计决策文档。
 
-Verification:
+验证：
 
 ```bash
 test -s docs/references/pi-mono-audit.md
 test -s docs/references/hermes-agent-audit.md
 test -s docs/references/openclaw-audit.md
+test -s docs/references/design-decisions.md
 ```
 
 Commit:
@@ -175,55 +311,26 @@ Commit:
 git commit -m "docs: audit reference agent projects"
 ```
 
-### Milestone C: Minimal HTTP runtime
+## 8. Milestone C: 最小 HTTP Runtime
 
-Objective: Build a local server that starts quickly and exposes a stable API contract.
+目标：跑起来一个最小 HTTP 服务，提供 health 和 mock chat。
 
-Files:
+文件：
 
-- Create: `package.json`
-- Create: `tsconfig.json`
-- Create: `src/server.ts`
-- Create: `src/config.ts`
-- Create: `src/http/errors.ts`
-- Create: `tests/server.test.ts`
+- 创建：`package.json`
+- 创建：`tsconfig.json`
+- 创建：`src/server.ts`
+- 创建：`src/config.ts`
+- 创建：`src/http/errors.ts`
+- 创建：`tests/server.test.ts`
 
-Initial API:
+测试优先：
 
-- `GET /health`
-- `POST /v1/chat`
+1. `/health` 返回 `ok: true`。
+2. `/v1/chat` 在 mock 模式返回固定 answer、sessionId、traceId、latencyMs。
+3. message 缺失时返回 400。
 
-Request example:
-
-```json
-{
-  "sessionId": "web-123",
-  "message": "pro 和 max 哪个更稳？",
-  "metadata": { "source": "webchat" }
-}
-```
-
-Response example:
-
-```json
-{
-  "ok": true,
-  "sessionId": "web-123",
-  "answer": "...",
-  "traceId": "...",
-  "latencyMs": 1234
-}
-```
-
-Steps:
-
-1. Add TypeScript build/test tooling.
-2. Write failing tests for `/health` and `/v1/chat` mock response.
-3. Implement minimal server.
-4. Run tests.
-5. Commit.
-
-Verification:
+验证：
 
 ```bash
 npm install
@@ -239,19 +346,19 @@ Commit:
 git commit -m "feat: add minimal support-agent HTTP runtime"
 ```
 
-### Milestone D: Provider abstraction
+## 9. Milestone D: Provider 抽象
 
-Objective: Add OpenAI-compatible provider with timeouts and request tracing.
+目标：支持 OpenAI-compatible provider，同时保留 mock provider。
 
-Files:
+文件：
 
-- Create: `src/providers/types.ts`
-- Create: `src/providers/openai-compatible.ts`
-- Create: `src/providers/mock-provider.ts`
-- Modify: `src/config.ts`
-- Test: `tests/providers.test.ts`
+- 创建：`src/providers/types.ts`
+- 创建：`src/providers/openai-compatible.ts`
+- 创建：`src/providers/mock-provider.ts`
+- 修改：`src/config.ts`
+- 创建：`tests/providers.test.ts`
 
-Design:
+接口：
 
 ```ts
 export interface ChatProvider {
@@ -259,19 +366,17 @@ export interface ChatProvider {
 }
 ```
 
-Steps:
+环境变量：
 
-1. Write tests for provider selection and timeout config.
-2. Implement mock provider.
-3. Implement OpenAI-compatible provider using `fetch`.
-4. Add env vars:
-   - `SUPPORT_AGENT_PROVIDER_BASE_URL`
-   - `SUPPORT_AGENT_API_KEY`
-   - `SUPPORT_AGENT_MODEL`
-   - `SUPPORT_AGENT_TIMEOUT_MS`
-5. Commit.
+```text
+SUPPORT_AGENT_PROVIDER=mock|openai-compatible
+SUPPORT_AGENT_PROVIDER_BASE_URL=
+SUPPORT_AGENT_API_KEY=
+SUPPORT_AGENT_MODEL=
+SUPPORT_AGENT_TIMEOUT_MS=30000
+```
 
-Verification:
+验证：
 
 ```bash
 npm test -- providers
@@ -284,39 +389,32 @@ Commit:
 git commit -m "feat: add OpenAI-compatible provider abstraction"
 ```
 
-### Milestone E: Doc index and fast retrieval
+## 10. Milestone E: 文档索引与快速检索
 
-Objective: Replace repeated file/tool exploration with precomputed lightweight retrieval.
+目标：用预构建索引替代每次请求里的文件探索。
 
-Files:
+文件：
 
-- Create: `src/docs/types.ts`
-- Create: `src/docs/loader.ts`
-- Create: `src/docs/indexer.ts`
-- Create: `src/docs/search.ts`
-- Create: `scripts/build-doc-index.ts`
-- Test: `tests/docs-search.test.ts`
+- 创建：`src/docs/types.ts`
+- 创建：`src/docs/loader.ts`
+- 创建：`src/docs/indexer.ts`
+- 创建：`src/docs/search.ts`
+- 创建：`scripts/build-doc-index.ts`
+- 创建：`tests/docs-search.test.ts`
+- 创建：`tests/fixtures/public/docs/`
 
-Design:
+设计：
 
-- Docs source is configured by env: `SUPPORT_AGENT_DOCS_DIR`.
-- Build `data/doc-index.json` from markdown docs.
-- Search returns top N snippets with path/title/score.
-- Default top N: 3.
+- 私有文档目录通过 `SUPPORT_AGENT_DOCS_DIR` 指定。
+- repo 内只保留 public fixture。
+- 索引输出默认写到 `local-data/indexes/` 或 `.data/indexes/`，不提交。
+- 搜索返回 path/title/snippet/score。
 
-Steps:
-
-1. Add fixture docs in `tests/fixtures/docs/`.
-2. Write failing retrieval tests for known terms like `max`, `pro`, `兑换码`.
-3. Implement loader and simple scorer.
-4. Add build script.
-5. Commit.
-
-Verification:
+验证：
 
 ```bash
 npm test -- docs-search
-npm run build-doc-index -- --docs tests/fixtures/docs --out /tmp/support-agent-index.json
+npm run build-doc-index -- --docs tests/fixtures/public/docs --out /tmp/support-agent-index.json
 ```
 
 Commit:
@@ -325,35 +423,54 @@ Commit:
 git commit -m "feat: add lightweight support doc index"
 ```
 
-### Milestone F: Fast support agent loop
+## 11. Milestone F: 高频问题 Direct-hit
 
-Objective: Implement bounded support flow with direct-hit path and docs-first answer generation.
+目标：常见确定性问题不进 LLM，直接返回稳定短答。
 
-Files:
+文件：
 
-- Create: `src/agent/types.ts`
-- Create: `src/agent/direct-hit.ts`
-- Create: `src/agent/fast-support-agent.ts`
-- Create: `src/prompts/support-system.ts`
-- Test: `tests/fast-support-agent.test.ts`
+- 创建：`src/agent/direct-hit.ts`
+- 创建：`src/agent/direct-hit-rules.ts`
+- 创建：`tests/direct-hit.test.ts`
 
-Policy:
+规则来源：
 
-1. If direct-hit rule matches, answer without LLM.
-2. Else retrieve top 3 snippets.
-3. Call LLM once with docs and compact memory.
-4. If confidence/coverage insufficient, allow at most one extra retrieval/LLM call.
-5. Hard cap total LLM calls at 2 by default; configurable hard cap 4.
+- 只放可公开的通用规则模板。
+- 私有业务规则放本地配置或私有 docs，不提交真实内容。
+- 如果要提交具体规则，必须确认它已公开且不含私有信息。
 
-Steps:
+验证：
 
-1. Write tests for direct-hit route returning in no-provider mode.
-2. Write tests for retrieval + mock provider answer.
-3. Implement loop budget enforcement.
-4. Add trace events: classify, retrieve, complete.
-5. Commit.
+```bash
+npm test -- direct-hit
+```
 
-Verification:
+Commit:
+
+```bash
+git commit -m "feat: add direct-hit support rules"
+```
+
+## 12. Milestone G: Fast Support Agent Loop
+
+目标：把 direct-hit、docs retrieval、provider、memory 组合成有预算的客服 agent。
+
+文件：
+
+- 创建：`src/agent/types.ts`
+- 创建：`src/agent/fast-support-agent.ts`
+- 创建：`src/prompts/support-system.ts`
+- 创建：`tests/fast-support-agent.test.ts`
+
+策略：
+
+1. direct-hit 命中：直接返回。
+2. 未命中：检索 top 3 snippets。
+3. LLM 调用一次生成回答。
+4. 如证据不足，最多追加一次检索/调用。
+5. 默认 hard cap 2 次 LLM；配置允许最高 4。
+
+验证：
 
 ```bash
 npm test -- fast-support-agent
@@ -366,34 +483,31 @@ Commit:
 git commit -m "feat: implement bounded fast support agent"
 ```
 
-### Milestone G: Memory and session stability
+## 13. Milestone H: Session Memory
 
-Objective: Add Hermes-inspired stable session memory without full Hermes CLI overhead.
+目标：实现 Hermes 风格的稳定记忆，但保持轻量。
 
-Files:
+文件：
 
-- Create: `src/memory/types.ts`
-- Create: `src/memory/session-store.ts`
-- Create: `src/memory/jsonl-store.ts`
-- Optional create: `src/memory/sqlite-store.ts`
-- Test: `tests/session-store.test.ts`
+- 创建：`src/memory/types.ts`
+- 创建：`src/memory/session-store.ts`
+- 创建：`src/memory/jsonl-store.ts`
+- 可选：`src/memory/sqlite-store.ts`
+- 创建：`tests/session-store.test.ts`
 
-Memory model:
+记忆模型：
 
-- Recent turns: last 6 messages.
-- Summary: compact rolling summary.
-- User facts: explicit durable support facts only.
-- Request trace link: traceId per answer.
+- 最近 6 条 turns。
+- rolling summary。
+- explicit support facts。
+- 每次回答关联 traceId。
 
-Steps:
+持久化路径：
 
-1. Write tests for create/read/update session.
-2. Implement JSONL or SQLite store.
-3. Wire store into `/v1/chat`.
-4. Add idempotent session handling.
-5. Commit.
+- 默认：`local-data/sessions/`
+- 不提交。
 
-Verification:
+验证：
 
 ```bash
 npm test -- session-store
@@ -406,39 +520,37 @@ Commit:
 git commit -m "feat: add persistent support sessions"
 ```
 
-### Milestone H: Audit, stats, and observability
+## 14. Milestone I: Trace / Stats / Audit
 
-Objective: Ensure future audit/statistics/analysis needs are supported from day one.
+目标：从早期就支持延迟拆解和审计。
 
-Files:
+文件：
 
-- Create: `src/tracing/types.ts`
-- Create: `src/tracing/trace-store.ts`
-- Create: `src/stats/latency-stats.ts`
-- Modify: `src/server.ts`
-- Test: `tests/tracing.test.ts`
+- 创建：`src/tracing/types.ts`
+- 创建：`src/tracing/trace-store.ts`
+- 创建：`src/stats/latency-stats.ts`
+- 修改：`src/server.ts`
+- 创建：`tests/tracing.test.ts`
 
-Data to record:
+记录字段：
 
 - traceId
 - sessionId
-- route
+- route: direct-hit / retrieval / fallback
 - total latency
 - provider latency
 - retrieval latency
-- doc paths used
-- direct-hit vs llm path
-- token usage if provider returns it
-- failure class if failed
+- docs used
+- token usage
+- error class
 
-Steps:
+默认输出：
 
-1. Write tests for trace persistence.
-2. Implement trace store.
-3. Add `/v1/admin/stats` local-only endpoint or token-gated endpoint.
-4. Commit.
+- `local-data/traces/`
+- `logs/`
+- 不提交。
 
-Verification:
+验证：
 
 ```bash
 npm test -- tracing
@@ -451,30 +563,22 @@ Commit:
 git commit -m "feat: add trace and latency statistics"
 ```
 
-### Milestone I: chatbot-mvp isolated integration
+## 15. Milestone J: chatbot-mvp 隔离集成
 
-Objective: Integrate as a new experimental backend without touching production `/api/chat`.
+目标：只添加实验路径，不影响正式 `/api/chat`。
 
-Files in `support-agent`:
+support-agent 文件：
 
-- Create: `docs/integrations/chatbot-mvp.md`
-- Create: `examples/chatbot-mvp-env.example`
+- 创建：`docs/integrations/chatbot-mvp.md`
+- 创建：`examples/chatbot-mvp-env.example`
 
-Files in chatbot-mvp only in a later explicit task:
+chatbot-mvp 后续单独任务：
 
-- Add new route or env-configured backend target, e.g. `/api/chat/support-agent`.
-- Do not change current `/api/chat` default.
+- 添加 `/api/chat/support-agent` 或等价实验路由。
+- 不改 `/api/chat` 默认指向。
+- 不停止/替换 8787。
 
-Steps:
-
-1. Define integration contract in docs.
-2. Add example env vars:
-   - `SUPPORT_AGENT_URL=http://127.0.0.1:8790`
-   - `SUPPORT_AGENT_TIMEOUT_MS=30000`
-3. In a separate task, add isolated bridge route and tests.
-4. Commit support-agent docs first.
-
-Verification:
+验证：
 
 ```bash
 curl -s -X POST http://127.0.0.1:8790/v1/chat \
@@ -488,36 +592,33 @@ Commit:
 git commit -m "docs: document chatbot-mvp support-agent integration"
 ```
 
-### Milestone J: Regression evaluation against existing support/Hermes benchmark
+## 16. Milestone K: 评测框架
 
-Objective: Prove the new backend is closer to OpenClaw speed while preserving quality.
+目标：证明新后端速度接近 OpenClaw support，同时保留质量。
 
-Files:
+文件：
 
-- Create: `eval/replay-support-questions.ts`
-- Create: `eval/report.ts`
-- Create: `docs/evaluation.md`
+- 创建：`eval/replay-support-questions.ts`
+- 创建：`eval/report.ts`
+- 创建：`docs/evaluation.md`
 
-Dataset sources:
+公开/私有边界：
 
-- Existing comparison JSON:
-  `/home/ubuntu/.openclaw/workspace/codesome-support-analysis/support-thread-crawl/ops/support-vs-hermes-compare-2026-04-24-20260424-104109.json`
+- 评测脚本可公开。
+- 私有题库和原始输出放 `local-data/eval-datasets/`、`eval-output/`，不提交。
+- 公开报告只放汇总指标或脱敏样例。
 
-Target metrics:
+指标：
 
-- Common requests under 5 seconds after warmup where direct-hit or high-confidence docs apply.
-- Full benchmark average should be much closer to OpenClaw support than Hermes CLI backend.
-- Zero production route changes during evaluation.
+- OK rate
+- avg / p50 / p95 latency
+- direct-hit rate
+- provider latency
+- retrieval latency
+- answer length
+- quality spot-check notes
 
-Steps:
-
-1. Write replay tool.
-2. Run support-agent against 19-question benchmark.
-3. Compare with existing support/Hermes numbers.
-4. Write report.
-5. Commit.
-
-Verification:
+验证：
 
 ```bash
 npm run eval:support-questions
@@ -529,54 +630,66 @@ Commit:
 git commit -m "test: add support question replay evaluation"
 ```
 
-## 4. Initial directory structure
+## 17. Milestone L: 安全与发布前检查
 
-```text
-support-agent/
-├── README.md
-├── LICENSE
-├── package.json
-├── tsconfig.json
-├── src/
-│   ├── server.ts
-│   ├── config.ts
-│   ├── agent/
-│   ├── docs/
-│   ├── memory/
-│   ├── providers/
-│   ├── tracing/
-│   └── stats/
-├── tests/
-├── eval/
-├── scripts/
-├── docs/
-│   ├── development-plan.md
-│   ├── architecture.md
-│   ├── integrations/
-│   └── references/
-└── examples/
+目标：保证公开仓库没有泄漏私有内容。
+
+检查：
+
+```bash
+git status --short
+git grep -n "API_KEY\|TOKEN\|SECRET\|BEGIN PRIVATE KEY" || true
+git grep -n "feishu\|飞书\|session_\|trace_" || true
 ```
 
-## 5. Open questions for later, not blockers now
+注意：出现 `feishu/飞书` 不一定都是泄漏，例如文档说明可保留；但真实文档内容、URL、token、cookie 不能保留。
 
-1. Whether to implement the first persistence store as SQLite or JSONL. Recommendation: SQLite if dependency/setup is acceptable; JSONL if fastest minimal path is preferred.
-2. Whether to use pi-mono packages directly or only mirror architectural ideas. Recommendation: audit first, then decide.
-3. Whether this repo should remain private indefinitely or become public after sanitization. Current instruction: create private repo now, keep open-source-compatible license.
-4. Exact deployment target and port. Recommendation: start local isolated port `8790`, no production route changes.
+可选后续添加：
 
-## 6. Definition of done for the first setup task
+- secret scanning pre-commit hook
+- CI secret scan
+- dependency audit
+- lint/test workflow
 
-- `support-agent` private GitHub repository exists under `zenenznze`.
-- `/home/ubuntu/support-agent` exists and is a git repo.
-- `README.md`, `LICENSE`, `.gitignore`, and `docs/development-plan.md` exist.
-- Initial commit pushed to remote `main`.
-- Task result records any deviation.
+Commit:
 
-## 7. Plan deviation policy
+```bash
+git commit -m "chore: add release safety checks"
+```
 
-At the end of each task:
+## 18. 实施顺序建议
 
-1. Compare completed work against this plan.
-2. Record deviations in `result.md`.
-3. Commit after each independent development item.
-4. Do not archive task unless deliverables are actually complete and verified.
+1. 先完成公开仓库文档基线。
+2. 审计参考项目。
+3. 做最小 HTTP runtime。
+4. 做 provider 和 mock。
+5. 做文档索引。
+6. 做 direct-hit。
+7. 做 fast agent loop。
+8. 做 session memory。
+9. 做 trace/stats。
+10. 做 isolated chatbot-mvp 集成。
+11. 做 benchmark replay。
+12. 再考虑灰度切流。
+
+## 19. 完成标准
+
+第一阶段完成标准：
+
+- GitHub 仓库 public。
+- README 中文。
+- 完整开发计划在 `docs/development-plan.md`。
+- 本地/私有测试数据边界在 `docs/local-private-data-policy.md`。
+- `.gitignore` 覆盖所有本地运行/评测/私有数据目录。
+- 远端 main 已推送。
+- unauthenticated GitHub 页面和 raw README 可访问。
+
+长期完成标准：
+
+- 本地 HTTP runtime 可运行。
+- 常见 direct-hit 问题 5 秒内返回。
+- 文档检索问题平均明显快于旧 Hermes CLI backend。
+- session memory 稳定。
+- trace/stats 可用于审计和优化。
+- chatbot-mvp 通过隔离实验路由可调用。
+- 未影响 OpenClaw 正式生产链路。
