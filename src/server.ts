@@ -2,6 +2,8 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_VERSION, loadConfig, type SupportAgentConfig } from './config.js'
 import { HttpError, toErrorBody } from './http/errors.js'
+import { createProvider } from './providers/factory.js'
+import type { ChatProvider } from './providers/types.js'
 
 interface StartServerOptions {
   port?: number
@@ -65,23 +67,33 @@ function requireMessage(value: unknown): string {
   return value.trim()
 }
 
-async function handleChat(req: IncomingMessage, res: ServerResponse) {
+async function handleChat(req: IncomingMessage, res: ServerResponse, config: SupportAgentConfig, provider: ChatProvider) {
   const startedAt = performance.now()
   const body = (await readJson(req)) as ChatRequestBody
   const sessionId = normalizeSessionId(body.sessionId)
-  requireMessage(body.message)
+  const message = requireMessage(body.message)
+  const completion = await provider.complete(
+    {
+      sessionId,
+      message,
+      metadata: body.metadata
+    },
+    { timeoutMs: config.provider.timeoutMs }
+  )
 
   sendJson(res, 200, {
     ok: true,
     sessionId,
-    answer: 'mock support answer',
+    answer: completion.answer,
     traceId: traceId(),
     latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
-    route: 'mock'
+    route: completion.route,
+    model: completion.model,
+    usage: completion.usage
   })
 }
 
-function createRequestHandler(config: SupportAgentConfig) {
+function createRequestHandler(config: SupportAgentConfig, provider: ChatProvider) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
@@ -96,7 +108,7 @@ function createRequestHandler(config: SupportAgentConfig) {
       }
 
       if (req.method === 'POST' && url.pathname === '/v1/chat') {
-        await handleChat(req, res)
+        await handleChat(req, res, config, provider)
         return
       }
 
@@ -111,7 +123,7 @@ function createRequestHandler(config: SupportAgentConfig) {
         ok: false,
         error: {
           code: 'INTERNAL_ERROR',
-          message: 'internal server error'
+          message: error instanceof Error ? error.message : 'internal server error'
         }
       })
     }
@@ -122,9 +134,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sup
   const baseConfig = loadConfig()
   const config: SupportAgentConfig = {
     port: options.port ?? options.config?.port ?? baseConfig.port,
-    version: options.config?.version ?? baseConfig.version ?? DEFAULT_VERSION
+    version: options.config?.version ?? baseConfig.version ?? DEFAULT_VERSION,
+    provider: options.config?.provider ?? baseConfig.provider
   }
-  const server = http.createServer(createRequestHandler(config))
+  const provider = createProvider(config.provider)
+  const server = http.createServer(createRequestHandler(config, provider))
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
