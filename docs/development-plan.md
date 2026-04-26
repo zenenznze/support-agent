@@ -353,7 +353,7 @@ git commit -m "feat: add minimal support-agent HTTP runtime"
 
 ## 9. Milestone D: Provider 抽象
 
-状态：前两阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`；OpenAI Responses API，commit `20980e1`）。provider 路线仍需继续补齐 Anthropic Messages API 与 provider conformance。
+状态：前三阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`；OpenAI Responses API，commit `20980e1`；Anthropic Messages API，commit `c9755ed`）。provider 路线下一步是补齐 provider conformance / response normalization。
 
 目标：建立统一 `ChatProvider` 抽象，支持多个 provider 协议，同时把 provider 输出归一到 support-agent 内部稳定格式。
 
@@ -381,7 +381,7 @@ provider kind 路线：
 mock                         # 测试和默认本地开发
 openai-compatible            # OpenAI-compatible Chat Completions；已完成第一版
 openai-responses             # OpenAI Responses API；已完成第一版
-anthropic-messages           # Anthropic Messages API；后续必须支持
+anthropic-messages           # Anthropic Messages API；已完成第一版
 ```
 
 环境变量路线：
@@ -432,6 +432,8 @@ git commit -m "feat: add OpenAI Responses provider"
 
 ### Milestone D2: Anthropic Messages API Provider
 
+状态：已完成第一版，commit `c9755ed`。已新增 `src/providers/anthropic-messages.ts`、`tests/providers-anthropic-messages.test.ts`，并接入 config/factory/type union。当前支持 `/v1/messages` 请求、`x-api-key` 与 `anthropic-version` header、文本 content block 解析、usage 归一、基础错误处理和 base URL `/v1` 去重。
+
 目标：新增 Anthropic Messages API provider，并把 Claude/Anthropic 输出归一成 `ChatCompletionOutput`。
 
 文件：
@@ -445,10 +447,10 @@ git commit -m "feat: add OpenAI Responses provider"
 测试优先：
 
 1. provider 向本地测试 HTTP server 发送 `/v1/messages` 请求。
-2. 请求包含 `x-api-key`、`anthropic-version`、model、max_tokens、messages。
+2. 请求包含 `x-api-key`、`anthropic-version`、model、max_tokens、messages、session metadata。
 3. 能解析 Anthropic content block 中的 text 到 `answer`。
 4. 能解析 input/output token usage。
-5. HTTP 错误、空 content、timeout 返回清晰错误。
+5. HTTP 错误、空 content、缺失 API key 返回清晰错误。
 
 验证：
 
@@ -465,6 +467,8 @@ git commit -m "feat: add Anthropic Messages provider"
 ```
 
 ### Milestone D3: Provider Conformance / Response Normalization
+
+状态：下一步待执行。
 
 目标：保证不同 provider 的请求错误、空答案、usage、model、route 字段在 support-agent 内部一致，避免 fast agent loop 依赖各家 API 细节。
 
