@@ -1,12 +1,12 @@
 # support-agent 完整开发计划
 
-> For Hermes: 后续实现本计划时，使用 subagent-driven-development 或等价的逐任务开发方式推进；每个相对独立事项完成后及时 commit。任何集成都必须保持 OpenClaw 正式 8787 链路不受影响。
+> For Hermes: 后续实现本计划时，使用 subagent-driven-development 或等价的逐任务开发方式推进；每个相对独立事项或阶段性进度完成后及时 commit/push；每次阶段完成后必须重新评估本计划并在必要时提交计划修订。任何集成都必须保持 OpenClaw 正式 8787 链路不受影响。
 
 目标：构建一个新的专用客服后端 `support-agent`，把 OpenClaw support 的速度、Hermes 的记忆稳定性、pi-mono 的模块化 runtime/provider/agent 设计结合起来。
 
 架构：从独立公开仓库开始，先做一个轻量 HTTP support runtime。核心是小而可控的 agent loop、预构建文档索引、紧凑 session memory、结构化 trace、可替换 provider，以及与现有 chatbot-mvp/OpenClaw 链路隔离的 adapter。
 
-技术栈：TypeScript/Node.js 作为主 runtime；OpenAI-compatible provider；SQLite 或 JSONL 作为第一版本地持久化；Python 仅用于可选离线评测/数据处理脚本；MIT License。
+技术栈：TypeScript/Node.js 作为主 runtime；provider 层至少支持 mock、OpenAI-compatible Chat Completions、OpenAI Responses API、Anthropic Messages API；SQLite 或 JSONL 作为第一版本地持久化；Python 仅用于可选离线评测/数据处理脚本；MIT License。
 
 ---
 
@@ -104,7 +104,8 @@ URL: https://github.com/openclaw/openclaw
 5. 回答策略：文档有明确答案时，优先直接给文档内容；没有时才补充说明。
 6. agent loop 必须有预算：最大 LLM 次数、最大检索次数、最大耗时。
 7. trace、stats、session memory 要从早期就设计，不后补。
-8. 每个开发事项及时 commit。
+8. 每个开发事项或阶段性进度都要及时 commit。
+9. 每完成一个阶段后，必须回看并必要时更新本总体计划；计划修订本身也要 commit。
 
 ## 4. 公开仓库与本地私有数据边界
 
@@ -160,9 +161,13 @@ src/
 │   ├── search.ts                      # 轻量检索
 │   └── types.ts
 ├── providers/
-│   ├── openai-compatible.ts           # OpenAI-compatible provider
+│   ├── types.ts                       # provider 统一输入/输出与错误类型
+│   ├── factory.ts                     # 根据配置创建 provider
 │   ├── mock-provider.ts               # 测试 provider
-│   └── types.ts
+│   ├── openai-compatible.ts           # OpenAI-compatible Chat Completions provider
+│   ├── openai-responses.ts            # OpenAI Responses API provider
+│   ├── anthropic-messages.ts          # Anthropic Messages API provider
+│   └── conformance.ts                 # provider 输出归一化 / 一致性辅助
 ├── memory/
 │   ├── session-store.ts               # session 存储接口
 │   ├── jsonl-store.ts                 # 简单本地持久化
@@ -348,17 +353,21 @@ git commit -m "feat: add minimal support-agent HTTP runtime"
 
 ## 9. Milestone D: Provider 抽象
 
-目标：支持 OpenAI-compatible provider，同时保留 mock provider。
+状态：第一阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`）。阶段复盘后确认 provider 路线需要扩展：不能只停留在 OpenAI-compatible Chat Completions，后续至少要支持 OpenAI Responses API 与 Anthropic Messages API。
 
-文件：
+目标：建立统一 `ChatProvider` 抽象，支持多个 provider 协议，同时把 provider 输出归一到 support-agent 内部稳定格式。
+
+已完成文件：
 
 - 创建：`src/providers/types.ts`
+- 创建：`src/providers/factory.ts`
 - 创建：`src/providers/openai-compatible.ts`
 - 创建：`src/providers/mock-provider.ts`
 - 修改：`src/config.ts`
+- 修改：`src/server.ts`
 - 创建：`tests/providers.test.ts`
 
-接口：
+统一接口：
 
 ```ts
 export interface ChatProvider {
@@ -366,28 +375,116 @@ export interface ChatProvider {
 }
 ```
 
-环境变量：
+provider kind 路线：
 
 ```text
-SUPPORT_AGENT_PROVIDER=mock|openai-compatible
+mock                         # 测试和默认本地开发
+openai-compatible            # OpenAI-compatible Chat Completions；已完成第一版
+openai-responses             # OpenAI Responses API；后续必须支持
+anthropic-messages           # Anthropic Messages API；后续必须支持
+```
+
+环境变量路线：
+
+```text
+SUPPORT_AGENT_PROVIDER=mock|openai-compatible|openai-responses|anthropic-messages
 SUPPORT_AGENT_PROVIDER_BASE_URL=
 SUPPORT_AGENT_API_KEY=
 SUPPORT_AGENT_MODEL=
 SUPPORT_AGENT_TIMEOUT_MS=30000
 ```
 
+### Milestone D1: OpenAI Responses API Provider
+
+目标：新增 OpenAI Responses API provider，并把其输出归一成 `ChatCompletionOutput`。
+
+文件：
+
+- 创建：`src/providers/openai-responses.ts`
+- 修改：`src/providers/types.ts`
+- 修改：`src/providers/factory.ts`
+- 修改：`src/config.ts`
+- 创建或扩展：`tests/providers-openai-responses.test.ts`
+
+测试优先：
+
+1. provider 向本地测试 HTTP server 发送 `/responses` 请求。
+2. 请求包含 model、input 或等价 messages 转换结果。
+3. 能解析 Responses API 的文本输出到 `answer`。
+4. 能解析 usage 到统一 token usage。
+5. HTTP 错误、空输出、timeout 返回清晰错误。
+
 验证：
 
 ```bash
-npm test -- providers
+npm test
 npm run build
+npm audit --audit-level=moderate
 ```
 
 Commit:
 
 ```bash
-git commit -m "feat: add OpenAI-compatible provider abstraction"
+git commit -m "feat: add OpenAI Responses provider"
 ```
+
+### Milestone D2: Anthropic Messages API Provider
+
+目标：新增 Anthropic Messages API provider，并把 Claude/Anthropic 输出归一成 `ChatCompletionOutput`。
+
+文件：
+
+- 创建：`src/providers/anthropic-messages.ts`
+- 修改：`src/providers/types.ts`
+- 修改：`src/providers/factory.ts`
+- 修改：`src/config.ts`
+- 创建或扩展：`tests/providers-anthropic-messages.test.ts`
+
+测试优先：
+
+1. provider 向本地测试 HTTP server 发送 `/v1/messages` 请求。
+2. 请求包含 `x-api-key`、`anthropic-version`、model、max_tokens、messages。
+3. 能解析 Anthropic content block 中的 text 到 `answer`。
+4. 能解析 input/output token usage。
+5. HTTP 错误、空 content、timeout 返回清晰错误。
+
+验证：
+
+```bash
+npm test
+npm run build
+npm audit --audit-level=moderate
+```
+
+Commit:
+
+```bash
+git commit -m "feat: add Anthropic Messages provider"
+```
+
+### Milestone D3: Provider Conformance / Response Normalization
+
+目标：保证不同 provider 的请求错误、空答案、usage、model、route 字段在 support-agent 内部一致，避免 fast agent loop 依赖各家 API 细节。
+
+文件：
+
+- 创建：`src/providers/conformance.ts`
+- 创建：`tests/providers-conformance.test.ts`
+- 修改：各 provider 测试，复用统一断言 fixture
+
+验收：
+
+- 所有 provider 都通过相同的 conformance 测试。
+- 统一输出字段至少包含 `answer`、`model`、`route`、可选 `usage`。
+- provider-specific 错误不泄漏密钥或完整请求体。
+- fast-support-agent 只依赖统一 `ChatProvider` 接口。
+
+Commit:
+
+```bash
+git commit -m "test: add provider conformance coverage"
+```
+
 
 ## 10. Milestone E: 文档索引与快速检索
 
@@ -662,15 +759,19 @@ git commit -m "chore: add release safety checks"
 1. 先完成公开仓库文档基线。
 2. 审计参考项目。
 3. 做最小 HTTP runtime。
-4. 做 provider 和 mock。
-5. 做文档索引。
-6. 做 direct-hit。
-7. 做 fast agent loop。
-8. 做 session memory。
-9. 做 trace/stats。
-10. 做 isolated chatbot-mvp 集成。
-11. 做 benchmark replay。
-12. 再考虑灰度切流。
+4. 做 provider 抽象和 mock。
+5. 阶段复盘并更新本计划；把新增 provider 协议需求写回 roadmap。
+6. 补齐 provider 多协议支持：OpenAI Responses API、Anthropic Messages API、provider conformance。
+7. 做文档索引。
+8. 做 direct-hit。
+9. 做 fast agent loop。
+10. 做 session memory。
+11. 做 trace/stats。
+12. 做 isolated chatbot-mvp 集成。
+13. 做 benchmark replay。
+14. 再考虑灰度切流。
+
+后续每完成一个阶段都要重复：验证 -> commit/push -> 复盘总体计划 -> 必要时提交计划修订。
 
 ## 19. 完成标准
 
@@ -687,6 +788,8 @@ git commit -m "chore: add release safety checks"
 长期完成标准：
 
 - 本地 HTTP runtime 可运行。
+- provider 层至少支持 mock、OpenAI-compatible Chat Completions、OpenAI Responses API、Anthropic Messages API。
+- 所有 provider 输出归一到稳定内部格式，并通过 conformance 测试。
 - 常见 direct-hit 问题 5 秒内返回。
 - 文档检索问题平均明显快于旧 Hermes CLI backend。
 - session memory 稳定。
