@@ -353,7 +353,7 @@ git commit -m "feat: add minimal support-agent HTTP runtime"
 
 ## 9. Milestone D: Provider 抽象
 
-状态：第一阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`）。阶段复盘后确认 provider 路线需要扩展：不能只停留在 OpenAI-compatible Chat Completions，后续至少要支持 OpenAI Responses API 与 Anthropic Messages API。
+状态：前两阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`；OpenAI Responses API，commit `20980e1`）。provider 路线仍需继续补齐 Anthropic Messages API 与 provider conformance。
 
 目标：建立统一 `ChatProvider` 抽象，支持多个 provider 协议，同时把 provider 输出归一到 support-agent 内部稳定格式。
 
@@ -380,7 +380,7 @@ provider kind 路线：
 ```text
 mock                         # 测试和默认本地开发
 openai-compatible            # OpenAI-compatible Chat Completions；已完成第一版
-openai-responses             # OpenAI Responses API；后续必须支持
+openai-responses             # OpenAI Responses API；已完成第一版
 anthropic-messages           # Anthropic Messages API；后续必须支持
 ```
 
@@ -395,6 +395,8 @@ SUPPORT_AGENT_TIMEOUT_MS=30000
 ```
 
 ### Milestone D1: OpenAI Responses API Provider
+
+状态：已完成第一版，commit `20980e1`。已新增 `src/providers/openai-responses.ts`、`tests/providers-openai-responses.test.ts`，并接入 config/factory/type union。当前支持 `/responses` 请求、`output_text` 与 `output[].content[].text` 文本解析、usage 归一和基础错误处理。
 
 目标：新增 OpenAI Responses API provider，并把其输出归一成 `ChatCompletionOutput`。
 
@@ -761,7 +763,7 @@ git commit -m "chore: add release safety checks"
 3. 做最小 HTTP runtime。
 4. 做 provider 抽象和 mock。
 5. 阶段复盘并更新本计划；把新增 provider 协议需求写回 roadmap。
-6. 补齐 provider 多协议支持：OpenAI Responses API、Anthropic Messages API、provider conformance。
+6. 已补齐 OpenAI Responses API provider；继续补齐 Anthropic Messages API 与 provider conformance。
 7. 做文档索引。
 8. 做 direct-hit。
 9. 做 fast agent loop。
