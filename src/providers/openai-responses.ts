@@ -1,3 +1,4 @@
+import { normalizeProviderOutput } from './conformance.js'
 import type {
   ChatCompletionInput,
   ChatCompletionOutput,
@@ -98,15 +99,15 @@ export class OpenAIResponsesProvider implements ChatProvider {
         throw new Error('OpenAI Responses provider returned an empty assistant message')
       }
 
-      return {
+      return normalizeProviderOutput('OpenAI Responses', {
         answer,
         model: payload.model || this.model,
         route: 'openai-responses',
         usage: {
-          inputTokens: payload.usage?.input_tokens ?? 0,
-          outputTokens: payload.usage?.output_tokens ?? 0
+          inputTokens: payload.usage?.input_tokens,
+          outputTokens: payload.usage?.output_tokens
         }
-      }
+      })
     } finally {
       clearTimeout(timeout)
     }

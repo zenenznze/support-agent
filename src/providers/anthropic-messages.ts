@@ -1,3 +1,4 @@
+import { normalizeProviderOutput } from './conformance.js'
 import type {
   AnthropicMessagesProviderConfig,
   ChatCompletionInput,
@@ -105,15 +106,15 @@ export class AnthropicMessagesProvider implements ChatProvider {
         throw new Error('Anthropic Messages provider returned an empty assistant message')
       }
 
-      return {
+      return normalizeProviderOutput('Anthropic Messages', {
         answer,
         model: payload.model || this.model,
         route: 'anthropic-messages',
         usage: {
-          inputTokens: payload.usage?.input_tokens ?? 0,
-          outputTokens: payload.usage?.output_tokens ?? 0
+          inputTokens: payload.usage?.input_tokens,
+          outputTokens: payload.usage?.output_tokens
         }
-      }
+      })
     } finally {
       clearTimeout(timeout)
     }

@@ -1,8 +1,9 @@
+import { normalizeProviderOutput } from './conformance.js'
 import type { ChatCompletionInput, ChatCompletionOutput, ChatProvider, CompletionOptions } from './types.js'
 
 export class MockProvider implements ChatProvider {
   async complete(_input: ChatCompletionInput, _options: CompletionOptions): Promise<ChatCompletionOutput> {
-    return {
+    return normalizeProviderOutput('Mock', {
       answer: 'mock support answer',
       model: 'mock',
       route: 'mock',
@@ -10,6 +11,6 @@ export class MockProvider implements ChatProvider {
         inputTokens: 0,
         outputTokens: 0
       }
-    }
+    })
   }
 }
