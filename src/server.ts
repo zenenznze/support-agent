@@ -1,9 +1,14 @@
 import http, { type IncomingMessage, type ServerResponse } from 'node:http'
+import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_VERSION, loadConfig, type SupportAgentConfig } from './config.js'
 import { HttpError, toErrorBody } from './http/errors.js'
 import { createProvider } from './providers/factory.js'
 import type { ChatProvider } from './providers/types.js'
+import { buildDocIndex } from './docs/indexer.js'
+import { loadMarkdownDocs } from './docs/loader.js'
+import type { DocIndex } from './docs/types.js'
+import { runFastSupportAgent } from './agent/fast-support-agent.js'
 
 interface StartServerOptions {
   port?: number
@@ -67,18 +72,28 @@ function requireMessage(value: unknown): string {
   return value.trim()
 }
 
-async function handleChat(req: IncomingMessage, res: ServerResponse, config: SupportAgentConfig, provider: ChatProvider) {
+async function handleChat(
+  req: IncomingMessage,
+  res: ServerResponse,
+  config: SupportAgentConfig,
+  provider: ChatProvider,
+  docIndex?: DocIndex
+) {
   const startedAt = performance.now()
   const body = (await readJson(req)) as ChatRequestBody
   const sessionId = normalizeSessionId(body.sessionId)
   const message = requireMessage(body.message)
-  const completion = await provider.complete(
+  const completion = await runFastSupportAgent(
     {
       sessionId,
       message,
       metadata: body.metadata
     },
-    { timeoutMs: config.provider.timeoutMs }
+    {
+      provider,
+      providerTimeoutMs: config.provider.timeoutMs,
+      docIndex
+    }
   )
 
   sendJson(res, 200, {
@@ -89,11 +104,13 @@ async function handleChat(req: IncomingMessage, res: ServerResponse, config: Sup
     latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
     route: completion.route,
     model: completion.model,
+    intent: completion.intent,
+    citations: completion.citations,
     usage: completion.usage
   })
 }
 
-function createRequestHandler(config: SupportAgentConfig, provider: ChatProvider) {
+function createRequestHandler(config: SupportAgentConfig, provider: ChatProvider, docIndex?: DocIndex) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
@@ -108,7 +125,7 @@ function createRequestHandler(config: SupportAgentConfig, provider: ChatProvider
       }
 
       if (req.method === 'POST' && url.pathname === '/v1/chat') {
-        await handleChat(req, res, config, provider)
+        await handleChat(req, res, config, provider, docIndex)
         return
       }
 
@@ -130,15 +147,30 @@ function createRequestHandler(config: SupportAgentConfig, provider: ChatProvider
   }
 }
 
+async function loadDocIndex(config: SupportAgentConfig): Promise<DocIndex | undefined> {
+  if (config.docs?.indexPath) {
+    const raw = await readFile(config.docs.indexPath, 'utf8')
+    return JSON.parse(raw) as DocIndex
+  }
+
+  if (config.docs?.docsDir) {
+    return buildDocIndex(await loadMarkdownDocs(config.docs.docsDir))
+  }
+
+  return undefined
+}
+
 export async function startServer(options: StartServerOptions = {}): Promise<SupportAgentServer> {
   const baseConfig = loadConfig()
   const config: SupportAgentConfig = {
     port: options.port ?? options.config?.port ?? baseConfig.port,
     version: options.config?.version ?? baseConfig.version ?? DEFAULT_VERSION,
-    provider: options.config?.provider ?? baseConfig.provider
+    provider: options.config?.provider ?? baseConfig.provider,
+    docs: options.config?.docs ?? baseConfig.docs
   }
   const provider = createProvider(config.provider)
-  const server = http.createServer(createRequestHandler(config, provider))
+  const docIndex = await loadDocIndex(config)
+  const server = http.createServer(createRequestHandler(config, provider, docIndex))
 
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)

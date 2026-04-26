@@ -1,9 +1,15 @@
 import type { ProviderConfig, ProviderKind } from './providers/types.js'
 
+export interface SupportDocsConfig {
+  indexPath?: string
+  docsDir?: string
+}
+
 export interface SupportAgentConfig {
   port: number
   version: string
   provider: ProviderConfig
+  docs?: SupportDocsConfig
 }
 
 export const DEFAULT_VERSION = '0.1.0'
@@ -59,6 +65,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): SupportAgentCo
   return {
     port: parsedPort,
     version: env.SUPPORT_AGENT_VERSION || DEFAULT_VERSION,
-    provider: parseProvider(env)
+    provider: parseProvider(env),
+    docs: {
+      indexPath: env.SUPPORT_AGENT_DOC_INDEX_PATH,
+      docsDir: env.SUPPORT_AGENT_DOCS_DIR
+    }
   }
 }
