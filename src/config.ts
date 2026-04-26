@@ -10,6 +10,7 @@ export const DEFAULT_VERSION = '0.1.0'
 export const DEFAULT_PORT = 8790
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30000
 export const DEFAULT_OPENAI_COMPATIBLE_MODEL = 'gpt-4o-mini'
+export const DEFAULT_ANTHROPIC_MESSAGES_MODEL = 'claude-3-5-haiku-latest'
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   if (!value) {
@@ -34,6 +35,16 @@ function parseProvider(env: NodeJS.ProcessEnv): ProviderConfig {
       baseUrl: env.SUPPORT_AGENT_PROVIDER_BASE_URL || 'https://api.openai.com/v1',
       apiKey: env.SUPPORT_AGENT_API_KEY || '',
       model: env.SUPPORT_AGENT_MODEL || DEFAULT_OPENAI_COMPATIBLE_MODEL,
+      timeoutMs
+    }
+  }
+
+  if (kind === 'anthropic-messages') {
+    return {
+      kind,
+      baseUrl: env.SUPPORT_AGENT_PROVIDER_BASE_URL || 'https://api.anthropic.com',
+      apiKey: env.SUPPORT_AGENT_API_KEY || '',
+      model: env.SUPPORT_AGENT_MODEL || DEFAULT_ANTHROPIC_MESSAGES_MODEL,
       timeoutMs
     }
   }

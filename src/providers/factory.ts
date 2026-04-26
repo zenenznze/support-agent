@@ -1,3 +1,4 @@
+import { AnthropicMessagesProvider } from './anthropic-messages.js'
 import { MockProvider } from './mock-provider.js'
 import { OpenAICompatibleProvider } from './openai-compatible.js'
 import { OpenAIResponsesProvider } from './openai-responses.js'
@@ -17,7 +18,16 @@ export function createProvider(config: ProviderConfig): ChatProvider {
     })
   }
 
-  return new OpenAIResponsesProvider({
+  if (config.kind === 'openai-responses') {
+    return new OpenAIResponsesProvider({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      timeoutMs: config.timeoutMs
+    })
+  }
+
+  return new AnthropicMessagesProvider({
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     model: config.model,

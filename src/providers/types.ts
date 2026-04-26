@@ -1,4 +1,4 @@
-export type ProviderKind = 'mock' | 'openai-compatible' | 'openai-responses'
+export type ProviderKind = 'mock' | 'openai-compatible' | 'openai-responses' | 'anthropic-messages'
 
 export interface ChatCompletionInput {
   sessionId: string
@@ -47,4 +47,12 @@ export interface OpenAIResponsesProviderConfig {
   timeoutMs: number
 }
 
-export type ProviderConfig = MockProviderConfig | OpenAICompatibleProviderConfig | OpenAIResponsesProviderConfig
+export interface AnthropicMessagesProviderConfig {
+  kind: 'anthropic-messages'
+  baseUrl: string
+  apiKey: string
+  model: string
+  timeoutMs: number
+}
+
+export type ProviderConfig = MockProviderConfig | OpenAICompatibleProviderConfig | OpenAIResponsesProviderConfig | AnthropicMessagesProviderConfig
