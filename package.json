@@ -8,6 +8,7 @@
   "scripts": {
     "test": "npm run build && node --test dist/tests/*.test.js",
     "build": "tsc -p tsconfig.json",
+    "build-doc-index": "npm run build && node dist/scripts/build-doc-index.js",
     "start:dev": "npm run build && node dist/src/server.js"
   },
   "dependencies": {},
