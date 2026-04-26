@@ -530,7 +530,7 @@ git commit -m "feat: add lightweight support doc index"
 
 ## 11. Milestone F: 高频问题 Direct-hit
 
-状态：下一步待执行。
+状态：已完成（commit 9f53dd8）。
 
 目标：常见确定性问题不进 LLM，直接返回稳定短答。
 
@@ -559,6 +559,8 @@ git commit -m "feat: add direct-hit support rules"
 ```
 
 ## 12. Milestone G: Fast Support Agent Loop
+
+状态：已完成（commit 9f53dd8）。
 
 目标：把 direct-hit、docs retrieval、provider、memory 组合成有预算的客服 agent。
 
