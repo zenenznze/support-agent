@@ -494,7 +494,7 @@ git commit -m "test: add provider conformance coverage"
 
 ## 10. Milestone E: 文档索引与快速检索
 
-状态：下一步待执行。
+状态：已完成第一版，commit `cc79bab`。已新增公开 fixture docs、markdown loader、token indexer、search、build-doc-index 脚本和 `tests/docs-search.test.ts`；索引输出可写到 `/tmp` 或 ignored local-data 路径，不提交生成索引。
 
 目标：用预构建索引替代每次请求里的文件探索。
 
@@ -529,6 +529,8 @@ git commit -m "feat: add lightweight support doc index"
 ```
 
 ## 11. Milestone F: 高频问题 Direct-hit
+
+状态：下一步待执行。
 
 目标：常见确定性问题不进 LLM，直接返回稳定短答。
 
