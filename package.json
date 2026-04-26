@@ -1,0 +1,21 @@
+{
+  "name": "support-agent",
+  "version": "0.1.0",
+  "description": "Lightweight support agent HTTP runtime",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "scripts": {
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "build": "tsc -p tsconfig.json",
+    "start:dev": "npm run build && node dist/src/server.js"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
