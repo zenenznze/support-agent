@@ -353,7 +353,7 @@ git commit -m "feat: add minimal support-agent HTTP runtime"
 
 ## 9. Milestone D: Provider 抽象
 
-状态：前三阶段已完成（mock + OpenAI-compatible Chat Completions，commit `2fb94db`；OpenAI Responses API，commit `20980e1`；Anthropic Messages API，commit `c9755ed`）。provider 路线下一步是补齐 provider conformance / response normalization。
+状态：Provider 抽象阶段已完成第一轮（mock + OpenAI-compatible Chat Completions，commit `2fb94db`；OpenAI Responses API，commit `20980e1`；Anthropic Messages API，commit `c9755ed`；provider conformance / response normalization，commit `6de11d9`）。下一步进入 Milestone E：文档索引与快速检索。
 
 目标：建立统一 `ChatProvider` 抽象，支持多个 provider 协议，同时把 provider 输出归一到 support-agent 内部稳定格式。
 
@@ -468,7 +468,7 @@ git commit -m "feat: add Anthropic Messages provider"
 
 ### Milestone D3: Provider Conformance / Response Normalization
 
-状态：下一步待执行。
+状态：已完成第一版，commit `6de11d9`。已新增 `src/providers/conformance.ts` 和 `tests/providers-conformance.test.ts`，并让现有 provider 通过统一 output normalization 返回非空 answer/model/route 和数字 usage；同时新增 provider error safety 断言，确保错误包含 provider 上下文且不泄漏 fake key 或用户请求内容。
 
 目标：保证不同 provider 的请求错误、空答案、usage、model、route 字段在 support-agent 内部一致，避免 fast agent loop 依赖各家 API 细节。
 
@@ -493,6 +493,8 @@ git commit -m "test: add provider conformance coverage"
 
 
 ## 10. Milestone E: 文档索引与快速检索
+
+状态：下一步待执行。
 
 目标：用预构建索引替代每次请求里的文件探索。
 
