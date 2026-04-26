@@ -28,7 +28,7 @@ function parseProvider(env: NodeJS.ProcessEnv): ProviderConfig {
     return { kind, timeoutMs }
   }
 
-  if (kind === 'openai-compatible') {
+  if (kind === 'openai-compatible' || kind === 'openai-responses') {
     return {
       kind,
       baseUrl: env.SUPPORT_AGENT_PROVIDER_BASE_URL || 'https://api.openai.com/v1',
