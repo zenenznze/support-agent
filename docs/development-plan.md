@@ -204,7 +204,8 @@ src/
 - hard cap：默认不超过 2 次 LLM；只有评测/诊断模式才允许提高到 4 次。
 - 文档检索 topK：3。
 - 单请求线上 timeout：15s 级别，必须把 retrieval latency、provider first-token/first-chunk latency、full-completion latency 分开记录。
-- quality replay timeout：与线上 fast gate 分开，可配置为 20-60s，用来评估答案质量，不作为生产 SLA。
+  - 当前实现：`SUPPORT_AGENT_PROVIDER_TIMEOUT_MS` 控制线上 provider budget，默认 15000ms；HTTP 响应已返回 `latency.retrievalMs/providerMs/totalMs`。现有 provider 仍是非 streaming，first-token/first-chunk 需要后续 streaming provider 或 provider instrumentation 再单独补齐。
+- quality replay timeout：与线上 fast gate 分开，可配置为 20-60s，用来评估答案质量，不作为生产 SLA；当前配置项为 `SUPPORT_AGENT_QUALITY_REPLAY_TIMEOUT_MS`，默认 60000ms。
 
 ### 5.4 API 草案
 
@@ -243,7 +244,12 @@ src/
   "answer": "...",
   "traceId": "trace_...",
   "latencyMs": 1234,
-  "route": "direct-hit"
+  "latency": {
+    "retrievalMs": 12,
+    "providerMs": 1200,
+    "totalMs": 1212
+  },
+  "route": "retrieval+openai-compatible"
 }
 ```
 
@@ -562,7 +568,7 @@ git commit -m "feat: add direct-hit support rules"
 
 ## 12. Milestone G: Fast Support Agent Loop
 
-状态：已完成（commit 9f53dd8）。
+状态：已完成（commit 9f53dd8）；延迟预算可配置与响应 latency breakdown 已补齐（commit a995b6e）。
 
 目标：把 direct-hit、docs retrieval、provider、memory 组合成有预算的客服 agent。
 
