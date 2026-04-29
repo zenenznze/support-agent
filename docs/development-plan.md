@@ -100,12 +100,13 @@ URL: https://github.com/openclaw/openclaw
 1. 未经明确确认，不替换 OpenClaw 正式 `/api/chat`。
 2. 未经明确确认，不改 8787 正式服务。
 3. 仓库公开，但本地私有测试数据不公开。
-4. 常见请求目标：warmup 后 5 秒内回复。
-5. 回答策略：文档有明确答案时，优先直接给文档内容；没有时才补充说明。
-6. agent loop 必须有预算：最大 LLM 次数、最大检索次数、最大耗时。
-7. trace、stats、session memory 要从早期就设计，不后补。
-8. 每个开发事项或阶段性进度都要及时 commit。
-9. 每完成一个阶段后，必须回看并必要时更新本总体计划；计划修订本身也要 commit。
+4. 常见请求目标：warmup 后不仅要尽快响应，还要尽量在 15 秒内完成完整回复；首段/可用响应目标 <= 10 秒，完整回答目标 <= 15 秒。模型 token 输出较慢时允许记录为尾延迟，但必须被 trace/stats 单独统计。
+5. 性能比较目标：在相同题库、相同 provider/model 和相同网络条件下，support-agent 的 p50/p95 完整回答时延应至少优于 OpenClaw support baseline，同时保留回答质量。
+6. 回答策略：文档有明确答案时，优先直接给文档内容；没有时才补充说明。
+7. agent loop 必须有预算：最大 LLM 次数、最大检索次数、最大耗时。
+8. trace、stats、session memory 要从早期就设计，不后补。
+9. 每个开发事项或阶段性进度都要及时 commit。
+10. 每完成一个阶段后，必须回看并必要时更新本总体计划；计划修订本身也要 commit。
 
 ## 4. 公开仓库与本地私有数据边界
 
@@ -197,12 +198,13 @@ src/
 
 默认预算：
 
-- direct-hit：0 次 LLM，目标 < 500ms。
-- 普通文档问答：1 次 LLM，目标 < 5s。
-- 复杂问题：最多 2 次 LLM，目标 < 15s。
-- hard cap：最多 4 次 LLM，但默认不启用到这么高。
+- direct-hit：0 次 LLM，目标 < 500ms，p95 保持亚秒级。
+- 普通文档问答：默认 1 次 LLM；首段/可用响应目标 <= 10s，完整回答目标 <= 15s。
+- 复杂问题：最多 2 次 LLM；首段/可用响应仍尽量 <= 10s，完整回答 hard target <= 15s，超过时要返回明确 fallback 或结构化超时错误。
+- hard cap：默认不超过 2 次 LLM；只有评测/诊断模式才允许提高到 4 次。
 - 文档检索 topK：3。
-- 单请求 timeout：30s。
+- 单请求线上 timeout：15s 级别，必须把 retrieval latency、provider first-token/first-chunk latency、full-completion latency 分开记录。
+- quality replay timeout：与线上 fast gate 分开，可配置为 20-60s，用来评估答案质量，不作为生产 SLA。
 
 ### 5.4 API 草案
 
@@ -703,7 +705,7 @@ git commit -m "docs: document chatbot-mvp support-agent integration"
 
 ## 16. Milestone K: 评测框架
 
-目标：证明新后端速度接近 OpenClaw support，同时保留质量。
+目标：证明新后端在同一题库、同一 provider/model 和相同网络条件下，完整回答时延至少优于 OpenClaw support baseline，同时保留质量。评测必须同时统计“首段/可用响应”和“完整回答完成”，避免只看开始响应而忽略模型 token 输出尾延迟。
 
 文件：
 
@@ -720,11 +722,15 @@ git commit -m "docs: document chatbot-mvp support-agent integration"
 指标：
 
 - OK rate
-- avg / p50 / p95 latency
+- first response latency（首段/可用响应），目标 <= 10s
+- full completion latency（完整回答完成），目标 <= 15s
+- avg / p50 / p95 latency，并与 OpenClaw support baseline 做同条件对比
 - direct-hit rate
-- provider latency
+- provider first-token / first-chunk latency
+- provider full-completion latency
 - retrieval latency
 - answer length
+- timeout / fallback rate
 - quality spot-check notes
 
 验证：
@@ -802,9 +808,10 @@ git commit -m "chore: add release safety checks"
 - 本地 HTTP runtime 可运行。
 - provider 层至少支持 mock、OpenAI-compatible Chat Completions、OpenAI Responses API、Anthropic Messages API。
 - 所有 provider 输出归一到稳定内部格式，并通过 conformance 测试。
-- 常见 direct-hit 问题 5 秒内返回。
-- 文档检索问题平均明显快于旧 Hermes CLI backend。
+- 常见 direct-hit 问题 p95 保持亚秒级。
+- 普通文档检索问题首段/可用响应 <= 10 秒，完整回答 <= 15 秒。
+- 在同一题库、同一 provider/model 和相同网络条件下，support-agent 的完整回答 p50/p95 至少优于 OpenClaw support baseline。
 - session memory 稳定。
-- trace/stats 可用于审计和优化。
+- trace/stats 可用于审计和优化，且能拆分 retrieval、provider first-token/first-chunk、provider full-completion、total full-completion。
 - chatbot-mvp 通过隔离实验路由可调用。
 - 未影响 OpenClaw 正式生产链路。
