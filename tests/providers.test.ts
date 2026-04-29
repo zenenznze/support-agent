@@ -63,6 +63,18 @@ describe('provider configuration', () => {
 
     const defaultConfig = loadConfig({})
     assert.equal(defaultConfig.provider.kind, 'mock')
+    assert.equal(defaultConfig.latency.onlineProviderTimeoutMs, 15000)
+    assert.equal(defaultConfig.latency.qualityReplayProviderTimeoutMs, 60000)
+  })
+
+  it('reads fast-loop latency budget environment variables', () => {
+    const config = loadConfig({
+      SUPPORT_AGENT_PROVIDER_TIMEOUT_MS: '15000',
+      SUPPORT_AGENT_QUALITY_REPLAY_TIMEOUT_MS: '45000'
+    })
+
+    assert.equal(config.latency.onlineProviderTimeoutMs, 15000)
+    assert.equal(config.latency.qualityReplayProviderTimeoutMs, 45000)
   })
 })
 

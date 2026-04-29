@@ -92,6 +92,7 @@ async function handleChat(
     {
       provider,
       providerTimeoutMs: config.provider.timeoutMs,
+      maxProviderTimeoutMs: config.latency.onlineProviderTimeoutMs,
       docIndex
     }
   )
@@ -102,6 +103,7 @@ async function handleChat(
     answer: completion.answer,
     traceId: traceId(),
     latencyMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    latency: completion.latency,
     route: completion.route,
     model: completion.model,
     intent: completion.intent,
@@ -166,7 +168,8 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sup
     port: options.port ?? options.config?.port ?? baseConfig.port,
     version: options.config?.version ?? baseConfig.version ?? DEFAULT_VERSION,
     provider: options.config?.provider ?? baseConfig.provider,
-    docs: options.config?.docs ?? baseConfig.docs
+    docs: options.config?.docs ?? baseConfig.docs,
+    latency: options.config?.latency ?? baseConfig.latency
   }
   const provider = createProvider(config.provider)
   const docIndex = await loadDocIndex(config)

@@ -51,6 +51,11 @@ export function toDirectHit(rule: DirectHitRule): DirectHitResult {
     route: 'direct-hit',
     intent: rule.intent,
     model: 'direct-hit-rules',
-    citations: []
+    citations: [],
+    latency: {
+      retrievalMs: 0,
+      providerMs: 0,
+      totalMs: 0
+    }
   }
 }

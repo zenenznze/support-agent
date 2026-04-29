@@ -4,12 +4,16 @@ import { buildDocIndex } from '../src/docs/indexer.js'
 import { runFastSupportAgent } from '../src/agent/fast-support-agent.js'
 import type { ChatProvider } from '../src/providers/types.js'
 
-function countingProvider(answer = 'provider synthesized answer', requireDocsContext = true) {
+function countingProvider(answer = 'provider synthesized answer', requireDocsContext = true, expectedTimeoutMs?: number) {
   let calls = 0
+  let seenTimeoutMs = 0
   const provider: ChatProvider = {
     async complete(input, options) {
       calls += 1
-      assert.ok(options.timeoutMs <= 2500)
+      seenTimeoutMs = options.timeoutMs
+      if (expectedTimeoutMs !== undefined) {
+        assert.equal(options.timeoutMs, expectedTimeoutMs)
+      }
       if (requireDocsContext) {
         assert.match(input.message, /Support docs context/)
       }
@@ -24,7 +28,8 @@ function countingProvider(answer = 'provider synthesized answer', requireDocsCon
 
   return {
     provider,
-    calls: () => calls
+    calls: () => calls,
+    seenTimeoutMs: () => seenTimeoutMs
   }
 }
 
@@ -54,20 +59,29 @@ describe('fast support agent loop', () => {
     assert.equal(result.model, 'direct-hit-rules')
     assert.equal(counted.calls(), 0)
     assert.deepEqual(result.citations, [])
+    assert.equal(result.latency.retrievalMs, 0)
+    assert.equal(result.latency.providerMs, 0)
+    assert.equal(result.latency.totalMs, 0)
   })
 
-  it('retrieves docs and bounds the provider call for non-direct questions', async () => {
-    const counted = countingProvider('Use billing settings to download invoices.')
+  it('retrieves docs and uses the configured provider timeout for non-direct questions', async () => {
+    const counted = countingProvider('Use billing settings to download invoices.', true, 15000)
     const result = await runFastSupportAgent(
       { sessionId: 's2', message: 'How do billing settings work for receipts?' },
-      { provider: counted.provider, providerTimeoutMs: 30000, maxProviderTimeoutMs: 2500, docIndex }
+      { provider: counted.provider, providerTimeoutMs: 30000, maxProviderTimeoutMs: 15000, docIndex }
     )
 
+    assert.equal(counted.seenTimeoutMs(), 15000)
     assert.equal(result.route, 'retrieval+mock')
     assert.equal(result.answer, 'Use billing settings to download invoices.')
     assert.equal(result.model, 'test-model')
     assert.equal(counted.calls(), 1)
     assert.equal(result.citations?.[0]?.path, 'billing/invoices.md')
+    assert.equal(typeof result.latency.retrievalMs, 'number')
+    assert.equal(typeof result.latency.providerMs, 'number')
+    assert.equal(typeof result.latency.totalMs, 'number')
+    assert.ok(result.latency.totalMs >= result.latency.retrievalMs)
+    assert.ok(result.latency.totalMs >= result.latency.providerMs)
   })
 
   it('falls back to provider route when no docs match', async () => {
@@ -80,5 +94,6 @@ describe('fast support agent loop', () => {
     assert.equal(result.route, 'provider+mock')
     assert.equal(counted.calls(), 1)
     assert.deepEqual(result.citations, [])
+    assert.equal(typeof result.latency.totalMs, 'number')
   })
 })

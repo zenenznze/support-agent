@@ -51,6 +51,10 @@ describe('support-agent HTTP runtime', () => {
     assert.match(body.traceId, /^trace_[a-z0-9]+$/)
     assert.equal(typeof body.latencyMs, 'number')
     assert.ok(body.latencyMs >= 0)
+    assert.equal(typeof body.latency, 'object')
+    assert.equal(typeof body.latency.retrievalMs, 'number')
+    assert.equal(typeof body.latency.providerMs, 'number')
+    assert.equal(typeof body.latency.totalMs, 'number')
   })
 
   it('rejects chat requests without a message', async () => {

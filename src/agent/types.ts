@@ -9,12 +9,19 @@ export interface SupportAgentInput {
   metadata?: unknown
 }
 
+export interface SupportAgentLatency {
+  retrievalMs: number
+  providerMs: number
+  totalMs: number
+}
+
 export interface DirectHitResult {
   answer: string
   route: 'direct-hit'
   intent: string
   model: 'direct-hit-rules'
   citations: []
+  latency: SupportAgentLatency
 }
 
 export interface FastSupportAgentResult {
@@ -23,6 +30,7 @@ export interface FastSupportAgentResult {
   model: string
   intent?: string
   citations: DocSearchResult[]
+  latency: SupportAgentLatency
   usage?: {
     inputTokens: number
     outputTokens: number
